@@ -111,7 +111,7 @@ func (c *Client) PostTweet(content string) error {
 			errorMsg += fmt.Sprintf(": %s", string(respBody))
 		}
 
-		return fmt.Errorf(errorMsg)
+		return fmt.Errorf("%s", errorMsg)
 	}
 
 	logger.Info("Tweet posted successfully (ID: %s)", postResp.Data.ID)
