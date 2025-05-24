@@ -1,0 +1,23 @@
+# x-scheduler configuration example
+# API configuration (optional - prefer X_BEARER_TOKEN environment variable)
+api:
+  bearer_token: "your_bearer_token_here"  # Not recommended for security
+
+posts:
+  # Past posts (kept as history - automatically skipped)
+  - content: "Yesterday's post - already published"
+    scheduled_at: "2024-06-23T10:00:00+09:00"
+    enabled: true  # Will be automatically skipped
+
+  - content: "Weekly development update: Shipped 3 features this week!"
+    scheduled_at: "2024-06-07T17:00:00+09:00"
+    enabled: true
+
+  # Regular scheduled posts
+  - content: "Good morning! Ready to tackle the day ahead!"
+    scheduled_at: "2024-06-01T08:00:00+09:00"
+    enabled: true
+
+  - content: "Another past post"
+    scheduled_at: "2024-05-23T15:00:00+09:00"
+    # enabled omitted = false (disabled)
