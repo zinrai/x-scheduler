@@ -133,7 +133,7 @@ func (e *Executor) processActualTestPost(post config.Post, index, total int, err
 		return 0
 	}
 
-	fmt.Printf("✓ Test post successful: %s\n", truncateContent(post.Content, 50))
+	fmt.Printf("Test post successful: %s\n", truncateContent(post.Content, 50))
 	return 1
 }
 

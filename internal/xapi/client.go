@@ -19,9 +19,8 @@ const (
 
 // Represents X API client
 type Client struct {
-	auth        *Auth
-	httpClient  *http.Client
-	retryConfig RetryConfig
+	auth       *Auth
+	httpClient *http.Client
 }
 
 // Creates a new X API client
@@ -31,7 +30,6 @@ func NewClient(bearerToken string) *Client {
 		httpClient: &http.Client{
 			Timeout: Timeout,
 		},
-		retryConfig: DefaultRetryConfig(),
 	}
 }
 
@@ -56,6 +54,7 @@ type PostTweetResponse struct {
 func (c *Client) PostTweet(content string) error {
 	// Validate authentication
 	if err := c.auth.IsValid(); err != nil {
+		logger.Error("Authentication error: %v", err)
 		return fmt.Errorf("authentication error: %w", err)
 	}
 
@@ -66,31 +65,34 @@ func (c *Client) PostTweet(content string) error {
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
+		logger.Error("Failed to marshal request: %v", err)
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	logger.Debug("Posting tweet: %s", content)
 
-	// Execute request with retry
-	resp, err := c.retryConfig.ExecuteWithRetry(func() (*http.Response, error) {
-		req, err := http.NewRequest("POST", PostTweetURL, bytes.NewBuffer(jsonBody))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		c.auth.AddHeaders(req)
-
-		return c.httpClient.Do(req)
-	})
-
+	// Create HTTP request
+	req, err := http.NewRequest("POST", PostTweetURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return fmt.Errorf("failed to post tweet: %w", err)
+		logger.Error("Failed to create HTTP request: %v", err)
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authentication headers
+	c.auth.AddHeaders(req)
+
+	// Execute request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		logger.Error("Failed to post tweet - network error: %v", err)
+		return fmt.Errorf("network error: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logger.Error("Failed to read response body: %v", err)
 		return fmt.Errorf("failed to read response: %w", err)
 	}
 
@@ -107,8 +109,9 @@ func (c *Client) PostTweet(content string) error {
 
 		if len(postResp.Errors) > 0 {
 			errorMsg += fmt.Sprintf(": %s", postResp.Errors[0].Message)
+			logger.Error("API error - status: %d, message: %s", resp.StatusCode, postResp.Errors[0].Message)
 		} else {
-			errorMsg += fmt.Sprintf(": %s", string(respBody))
+			logger.Error("API error - status: %d, response: %s", resp.StatusCode, string(respBody))
 		}
 
 		return fmt.Errorf("%s", errorMsg)

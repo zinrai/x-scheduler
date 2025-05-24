@@ -8,7 +8,6 @@ A command-line tool for scheduling X (Twitter) posts using YAML configuration fi
 - **Cron Integration**: Leverages system cron for reliable scheduling
 - **Stateless Design**: No database or persistent state required
 - **RFC 3339 Time Format**: Standard-compliant time specifications
-- **Retry Logic**: Automatic retry for transient API failures
 - **X API v2 Support**
 - **Test Mode**: Test posts immediately with dry-run capability
 
@@ -172,7 +171,21 @@ Example output with test posts:
    - Loads configuration at execution time
    - Finds posts matching current time (±1 minute)
    - Executes test posts immediately regardless of schedule
-   - Posts to X API with retry logic
+   - Posts to X API with detailed error logging
+
+## Handling Post Failures
+
+When x-scheduler fails to post a tweet, it does not automatically retry. Instead, it logs detailed error information to help you detect and resolve issues.
+
+When a post fails, x-scheduler outputs detailed error logs like:
+
+```
+[ERROR] Failed to post tweet - network error: connection timeout
+[ERROR] API error - status: 401, message: Unauthorized
+[ERROR] Authentication error: bearer token is required
+```
+
+Failed posts are not automatically retried, so external monitoring and manual intervention are required.
 
 ## Flexible Past Post Handling
 
