@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 	"time"
 )
@@ -79,58 +78,6 @@ func TestConfig_Validate(t *testing.T) {
 				if err != nil {
 					t.Errorf("Validate() unexpected error = %v", err)
 				}
-			}
-		})
-	}
-}
-
-func TestConfig_GetAPIToken(t *testing.T) {
-	// Save original env var
-	originalToken := os.Getenv("X_BEARER_TOKEN")
-	defer os.Setenv("X_BEARER_TOKEN", originalToken)
-
-	tests := []struct {
-		name     string
-		envToken string
-		config   Config
-		want     string
-	}{
-		{
-			name:     "environment variable takes precedence",
-			envToken: "env_token_123",
-			config: Config{
-				API: &APIConfig{
-					BearerToken: "config_token_456",
-				},
-			},
-			want: "env_token_123",
-		},
-		{
-			name:     "config token when env var not set",
-			envToken: "",
-			config: Config{
-				API: &APIConfig{
-					BearerToken: "config_token_456",
-				},
-			},
-			want: "config_token_456",
-		},
-		{
-			name:     "empty string when neither set",
-			envToken: "",
-			config: Config{
-				API: nil,
-			},
-			want: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("X_BEARER_TOKEN", tt.envToken)
-			got := tt.config.GetAPIToken()
-			if got != tt.want {
-				t.Errorf("GetAPIToken() = %v, want %v", got, tt.want)
 			}
 		})
 	}

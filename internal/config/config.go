@@ -58,17 +58,6 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Returns the API token from environment variable or config
-func (c *Config) GetAPIToken() string {
-	if token := os.Getenv("X_BEARER_TOKEN"); token != "" {
-		return token
-	}
-	if c.API != nil {
-		return c.API.BearerToken
-	}
-	return ""
-}
-
 // Returns only enabled posts
 func (c *Config) GetEnabledPosts() []Post {
 	var enabled []Post

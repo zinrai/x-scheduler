@@ -5,29 +5,26 @@ import (
 	"time"
 
 	"github.com/zinrai/x-scheduler/internal/config"
-	"github.com/zinrai/x-scheduler/internal/xapi"
+	"github.com/zinrai/x-scheduler/internal/poster"
 	"github.com/zinrai/x-scheduler/pkg/logger"
 )
 
 // Handles the execution of scheduled posts
 type Executor struct {
-	client *xapi.Client
 }
 
 // Creates a new executor instance
-func NewExecutor(bearerToken string) *Executor {
-	return &Executor{
-		client: xapi.NewClient(bearerToken),
-	}
+func NewExecutor() *Executor {
+	return &Executor{}
 }
 
 // Finds and posts tweets that should be posted at the current time
 func (e *Executor) Execute(cfg *config.Config) error {
 	logger.Info("Starting execution check")
 
-	// Validate API credentials
-	if err := e.client.ValidateCredentials(); err != nil {
-		return fmt.Errorf("invalid API credentials: %w", err)
+	// Validate poster (xurl command)
+	if err := poster.Validate(); err != nil {
+		return fmt.Errorf("poster validation failed: %w", err)
 	}
 
 	// Get enabled posts
@@ -88,12 +85,13 @@ func (e *Executor) processRegularPosts(posts []config.Post, errors *[]error) int
 	for i, post := range posts {
 		logger.Info("Posting tweet %d/%d: %s", i+1, len(posts), truncateContent(post.Content, 50))
 
-		if err := e.client.PostTweet(post.Content); err != nil {
+		if err := poster.Post(post.Content); err != nil {
 			logger.Error("Failed to post tweet: %v", err)
 			*errors = append(*errors, fmt.Errorf("failed to post tweet '%s': %w", truncateContent(post.Content, 30), err))
 			continue
 		}
 
+		logger.Info("Tweet posted successfully: %s", truncateContent(post.Content, 50))
 		successCount++
 	}
 
@@ -119,7 +117,7 @@ func (e *Executor) processTestPosts(posts []config.Post, errors *[]error) int {
 // Handles a single dry-run test post
 func (e *Executor) processDryRunPost(post config.Post, index, total int) int {
 	logger.Info("Test post %d/%d (DRY RUN): %s", index+1, total, truncateContent(post.Content, 50))
-	fmt.Printf("[DRY RUN] Would post: %s\n", post.Content)
+	fmt.Printf("✓ [DRY RUN] Would post: %s\n", post.Content)
 	return 1
 }
 
@@ -127,13 +125,13 @@ func (e *Executor) processDryRunPost(post config.Post, index, total int) int {
 func (e *Executor) processActualTestPost(post config.Post, index, total int, errors *[]error) int {
 	logger.Info("Test post %d/%d: %s", index+1, total, truncateContent(post.Content, 50))
 
-	if err := e.client.PostTweet(post.Content); err != nil {
+	if err := poster.Post(post.Content); err != nil {
 		logger.Error("Failed to post test tweet: %v", err)
 		*errors = append(*errors, fmt.Errorf("failed to post test tweet '%s': %w", truncateContent(post.Content, 30), err))
 		return 0
 	}
 
-	fmt.Printf("Test post successful: %s\n", truncateContent(post.Content, 50))
+	fmt.Printf("✓ Test post successful: %s\n", truncateContent(post.Content, 50))
 	return 1
 }
 

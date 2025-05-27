@@ -8,39 +8,33 @@ A command-line tool for scheduling X (Twitter) posts using YAML configuration fi
 - **Cron Integration**: Leverages system cron for reliable scheduling
 - **Stateless Design**: No database or persistent state required
 - **RFC 3339 Time Format**: Standard-compliant time specifications
-- **X API v2 Support**
 - **Test Mode**: Test posts immediately with dry-run capability
-
-## Installation
-
-### Build from Source
-
-```bash
-$ go build -o x-scheduler cmd/main.go
-```
 
 ### System Requirements
 
 - Linux/Unix system with cron
 - Root access (for writing to `/etc/cron.d/`)
+- [xurl](https://github.com/xdevplatform/xurl) command installed and configured
 
-## Configuration
+## Installation
 
-### Environment Variables
+### Prerequisites
+
+x-scheduler uses [xurl](https://github.com/xdevplatform/xurl) for X API authentication and posts, which provides.
+
+### Build
 
 ```bash
-$ export X_BEARER_TOKEN="your_x_api_bearer_token_here"
+$ go build -o x-scheduler cmd/main.go
 ```
+
+## Configuration
 
 ### YAML Configuration File
 
 Create a YAML file with your scheduled posts:
 
 ```yaml
-# API configuration (optional - prefer X_BEARER_TOKEN environment variable)
-api:
-  bearer_token: "your_bearer_token_here"  # Not recommended for security
-
 posts:
   # Regular scheduled posts
   - content: "Good morning! Ready to tackle the day ahead!"
@@ -82,8 +76,6 @@ posts:
 - `test` (optional): Set to `true` to execute immediately for testing (default: `false`)
 - `dry_run` (optional): Set to `true` to simulate posting without actually posting (requires `test: true`)
 
-**Token Priority**: Environment variable `X_BEARER_TOKEN` takes precedence over YAML configuration.
-
 ## Usage
 
 ### Validate Configuration
@@ -101,7 +93,7 @@ Configuration validation successful
 Total posts: 6
 Enabled posts: 4
 Future posts: 2
-API token: configured
+Poster: xurl command available
 
 Upcoming posts:
   2025-06-01 08:00: Good morning! Ready to tackle the day ahead!
@@ -144,7 +136,7 @@ Example output with test posts:
 ✓ Test post successful: Testing API connection
 
 2025/05/24 10:30:16 [INFO] Test post 2/2 (DRY RUN): This is a dry run test
-[DRY RUN] Would post: This is a dry run test
+✓ [DRY RUN] Would post: This is a dry run test
 ```
 
 ### Command Line Options
@@ -171,19 +163,11 @@ Example output with test posts:
    - Loads configuration at execution time
    - Finds posts matching current time (±1 minute)
    - Executes test posts immediately regardless of schedule
-   - Posts to X API with detailed error logging
+   - Posts to X API via xurl with detailed error logging
 
 ## Handling Post Failures
 
-When x-scheduler fails to post a tweet, it does not automatically retry. Instead, it logs detailed error information to help you detect and resolve issues.
-
-When a post fails, x-scheduler outputs detailed error logs like:
-
-```
-[ERROR] Failed to post tweet - network error: connection timeout
-[ERROR] API error - status: 401, message: Unauthorized
-[ERROR] Authentication error: bearer token is required
-```
+When x-scheduler fails to post a tweet, it does not automatically retry. Instead, it logs detailed error information from xurl to help you detect and resolve issues.
 
 Failed posts are not automatically retried, so external monitoring and manual intervention are required.
 

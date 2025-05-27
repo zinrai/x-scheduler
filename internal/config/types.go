@@ -4,13 +4,7 @@ import "time"
 
 // Represents the complete configuration structure
 type Config struct {
-	API   *APIConfig `yaml:"api,omitempty"`
-	Posts []Post     `yaml:"posts"`
-}
-
-// Holds API authentication settings
-type APIConfig struct {
-	BearerToken string `yaml:"bearer_token,omitempty"`
+	Posts []Post `yaml:"posts"`
 }
 
 // Represents a single scheduled post

@@ -1,8 +1,3 @@
-# x-scheduler configuration example
-# API configuration (optional - prefer X_BEARER_TOKEN environment variable)
-api:
-  bearer_token: "your_bearer_token_here"  # Not recommended for security
-
 posts:
   # Past posts (kept as history - automatically skipped)
   - content: "Yesterday's post - already published"

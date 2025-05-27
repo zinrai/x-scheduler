@@ -9,6 +9,7 @@ import (
 	"github.com/zinrai/x-scheduler/internal/config"
 	"github.com/zinrai/x-scheduler/internal/cron"
 	"github.com/zinrai/x-scheduler/internal/executor"
+	"github.com/zinrai/x-scheduler/internal/poster"
 	"github.com/zinrai/x-scheduler/pkg/logger"
 )
 
@@ -136,12 +137,12 @@ func runValidate(cfg *config.Config, configPath string) error {
 	fmt.Printf("Enabled posts: %d\n", len(enabledPosts))
 	fmt.Printf("Future posts: %d\n", len(futurePosts))
 
-	// Check API token
-	token := cfg.GetAPIToken()
-	if token == "" {
-		fmt.Printf("Warning: No API token configured (set X_BEARER_TOKEN environment variable)\n")
+	// Check poster (xurl) availability
+	if err := poster.Validate(); err != nil {
+		fmt.Printf("Warning: Poster validation failed: %v\n", err)
+		fmt.Printf("Make sure xurl is installed and configured properly\n")
 	} else {
-		fmt.Printf("API token: configured\n")
+		fmt.Printf("Poster: xurl command available\n")
 	}
 
 	if len(futurePosts) > 0 {
@@ -217,14 +218,8 @@ func generateCronConfiguration(generator *cron.Generator, futurePosts []config.P
 func runExecute(cfg *config.Config, configPath string) error {
 	logger.Info("Executing scheduled posts")
 
-	// Get API token
-	token := cfg.GetAPIToken()
-	if token == "" {
-		return fmt.Errorf("API token not configured (set X_BEARER_TOKEN environment variable)")
-	}
-
 	// Create executor and execute posts
-	exec := executor.NewExecutor(token)
+	exec := executor.NewExecutor()
 	return exec.Execute(cfg)
 }
 
@@ -243,8 +238,9 @@ func showHelp() {
 	fmt.Printf("  x-scheduler -validate config.yaml\n")
 	fmt.Printf("  x-scheduler -setup config.yaml\n")
 	fmt.Printf("  x-scheduler -execute config.yaml\n\n")
-	fmt.Printf("ENVIRONMENT:\n")
-	fmt.Printf("  X_BEARER_TOKEN    X API Bearer Token\n")
+	fmt.Printf("REQUIREMENTS:\n")
+	fmt.Printf("  xurl        X API command-line tool for OAuth 2.0 authentication\n")
+	fmt.Printf("              Install from: https://github.com/xdevplatform/xurl\n")
 }
 
 func showUsage() {
