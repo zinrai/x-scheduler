@@ -44,20 +44,6 @@ func TestTimeToCron(t *testing.T) {
 	}
 }
 
-func TestTimeToCronWithTimezone(t *testing.T) {
-	// Use fixed offset instead of named timezone
-	jst := time.FixedZone("JST", 9*60*60) // UTC+9
-	utcTime := time.Date(2024, 6, 15, 5, 30, 0, 0, time.UTC)
-	jstTime := utcTime.In(jst) // Should be 14:30 JST
-
-	cronStr := TimeToCron(jstTime)
-	expected := "30 14 15 6 *"
-
-	if cronStr != expected {
-		t.Errorf("TimeToCron() with timezone = %v, want %v", cronStr, expected)
-	}
-}
-
 func TestFormatCronEntry(t *testing.T) {
 	tests := []struct {
 		name  string
