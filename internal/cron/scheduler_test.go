@@ -45,8 +45,8 @@ func TestTimeToCron(t *testing.T) {
 }
 
 func TestTimeToCronWithTimezone(t *testing.T) {
-	// Test timezone handling
-	jst, _ := time.LoadLocation("Asia/Tokyo")
+	// Use fixed offset instead of named timezone
+	jst := time.FixedZone("JST", 9*60*60) // UTC+9
 	utcTime := time.Date(2024, 6, 15, 5, 30, 0, 0, time.UTC)
 	jstTime := utcTime.In(jst) // Should be 14:30 JST
 
