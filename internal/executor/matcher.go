@@ -6,60 +6,68 @@ import (
 	"github.com/zinrai/x-scheduler/internal/config"
 )
 
-// Defines the acceptable time window for matching scheduled posts
-const TimeWindow = 1 * time.Minute
+// Checks if the given time is today and in the future
+func IsTodayAndFuture(postTime, currentTime time.Time) bool {
+	today := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), 0, 0, 0, 0, currentTime.Location())
+	tomorrow := today.Add(24 * time.Hour)
 
-// Finds posts that should be posted at the current time
-func FindMatchingPosts(posts []config.Post, currentTime time.Time) []config.Post {
-	var matches []config.Post
+	// Check if post is today and in the future
+	return postTime.After(today) && postTime.Before(tomorrow) && postTime.After(currentTime)
+}
+
+// Checks if the given time is today
+func IsToday(postTime, currentTime time.Time) bool {
+	today := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), 0, 0, 0, 0, currentTime.Location())
+	tomorrow := today.Add(24 * time.Hour)
+
+	return postTime.After(today) && postTime.Before(tomorrow)
+}
+
+// Filters posts to include only future posts for today
+func FilterFuturePosts(posts []config.Post, currentTime time.Time) []config.Post {
+	var futurePosts []config.Post
 
 	for _, post := range posts {
-		// Test posts are always executed regardless of schedule
-		if post.Test {
-			matches = append(matches, post)
-		} else if ShouldPostNow(post.ScheduledAt, currentTime) {
-			matches = append(matches, post)
+		if post.Enabled {
+			// Test posts are always included
+			if post.Test {
+				futurePosts = append(futurePosts, post)
+				continue
+			}
+
+			// Regular posts must be today and in the future
+			if IsTodayAndFuture(post.ScheduledAt, currentTime) {
+				futurePosts = append(futurePosts, post)
+			}
 		}
 	}
 
-	return matches
+	return futurePosts
 }
 
-// Returns posts marked for testing
-func FindTestPosts(posts []config.Post) []config.Post {
-	var testPosts []config.Post
+// Sorts scheduled posts by execution time
+func SortByExecuteTime(posts []ScheduledPost) []ScheduledPost {
+	sorted := make([]ScheduledPost, len(posts))
+	copy(sorted, posts)
 
-	for _, post := range posts {
-		if post.Test {
-			testPosts = append(testPosts, post)
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[j].ExecuteAt.Before(sorted[i].ExecuteAt) {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
 		}
 	}
 
-	return testPosts
+	return sorted
 }
 
-// Determines if a post should be posted at the current time
-func ShouldPostNow(scheduledAt, currentTime time.Time) bool {
-	// Truncate both times to minute precision for comparison
-	scheduledMinute := scheduledAt.Truncate(time.Minute)
-	currentMinute := currentTime.Truncate(time.Minute)
-
-	// Allow posting within the time window
-	diff := currentMinute.Sub(scheduledMinute)
-	if diff < 0 {
-		diff = -diff
-	}
-
-	return diff <= TimeWindow
-}
-
-// Returns the next scheduled post time
+// Returns the next scheduled post time from the given posts
 func GetNextScheduledTime(posts []config.Post) *time.Time {
 	var next *time.Time
 	now := time.Now()
 
 	for _, post := range posts {
-		if post.ScheduledAt.After(now) {
+		if post.Enabled && post.ScheduledAt.After(now) {
 			if next == nil || post.ScheduledAt.Before(*next) {
 				next = &post.ScheduledAt
 			}
@@ -69,14 +77,16 @@ func GetNextScheduledTime(posts []config.Post) *time.Time {
 	return next
 }
 
-// Returns the number of posts scheduled in the future
-func CountPendingPosts(posts []config.Post) int {
-	count := 0
+// Returns the number of posts scheduled in the future for today
+func CountFuturePosts(posts []config.Post) int {
 	now := time.Now()
+	count := 0
 
 	for _, post := range posts {
-		if post.ScheduledAt.After(now) {
-			count++
+		if post.Enabled {
+			if post.Test || IsTodayAndFuture(post.ScheduledAt, now) {
+				count++
+			}
 		}
 	}
 

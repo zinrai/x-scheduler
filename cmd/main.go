@@ -4,23 +4,21 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+	"time"
 
 	"github.com/zinrai/x-scheduler/internal/config"
-	"github.com/zinrai/x-scheduler/internal/cron"
 	"github.com/zinrai/x-scheduler/internal/executor"
 	"github.com/zinrai/x-scheduler/internal/poster"
 	"github.com/zinrai/x-scheduler/pkg/logger"
 )
 
 const (
-	Version = "0.1.0"
+	Version = "0.2.0"
 )
 
 func main() {
 	var (
-		setupFlag    = flag.Bool("setup", false, "Generate cron configuration from YAML file")
-		executeFlag  = flag.Bool("execute", false, "Execute scheduled posts for current time")
+		executeFlag  = flag.Bool("execute", false, "Execute posts scheduled for today")
 		validateFlag = flag.Bool("validate", false, "Validate configuration file")
 		versionFlag  = flag.Bool("version", false, "Show version information")
 		verboseFlag  = flag.Bool("verbose", false, "Enable verbose logging")
@@ -47,21 +45,21 @@ func main() {
 	}
 
 	// Validate flags and get config path
-	configPath := validateFlagsAndGetConfigPath(*setupFlag, *executeFlag, *validateFlag)
+	configPath := validateFlagsAndGetConfigPath(*executeFlag, *validateFlag)
 
 	// Execute the requested operation
-	if err := runOperation(*setupFlag, *executeFlag, *validateFlag, configPath); err != nil {
+	if err := runOperation(*executeFlag, *validateFlag, configPath); err != nil {
 		logger.Fatal("Operation failed: %v", err)
 	}
 }
 
 // Validates command line flags and returns config path
-func validateFlagsAndGetConfigPath(setup, execute, validate bool) string {
+func validateFlagsAndGetConfigPath(execute, validate bool) string {
 	// Count and validate active flags
-	activeFlags := countActiveFlags(setup, execute, validate)
+	activeFlags := countActiveFlags(execute, validate)
 
 	if activeFlags == 0 {
-		fmt.Fprintf(os.Stderr, "Error: Must specify one of -setup, -execute, or -validate\n")
+		fmt.Fprintf(os.Stderr, "Error: Must specify one of -execute or -validate\n")
 		showUsage()
 		os.Exit(1)
 	}
@@ -77,11 +75,8 @@ func validateFlagsAndGetConfigPath(setup, execute, validate bool) string {
 }
 
 // Counts the number of active operation flags
-func countActiveFlags(setup, execute, validate bool) int {
+func countActiveFlags(execute, validate bool) int {
 	count := 0
-	if setup {
-		count++
-	}
 	if execute {
 		count++
 	}
@@ -102,7 +97,7 @@ func getConfigFilePath() string {
 	return args[0]
 }
 
-func runOperation(setup, execute, validate bool, configPath string) error {
+func runOperation(execute, validate bool, configPath string) error {
 	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -117,8 +112,6 @@ func runOperation(setup, execute, validate bool, configPath string) error {
 	switch {
 	case validate:
 		return runValidate(cfg, configPath)
-	case setup:
-		return runSetup(cfg, configPath)
 	case execute:
 		return runExecute(cfg, configPath)
 	default:
@@ -130,12 +123,12 @@ func runValidate(cfg *config.Config, configPath string) error {
 	logger.Info("Validating configuration: %s", configPath)
 
 	enabledPosts := cfg.GetEnabledPosts()
-	futurePosts := cfg.GetFuturePosts()
+	futurePosts := executor.FilterFuturePosts(cfg.Posts, time.Now())
 
 	fmt.Printf("Configuration validation successful\n")
 	fmt.Printf("Total posts: %d\n", len(cfg.Posts))
 	fmt.Printf("Enabled posts: %d\n", len(enabledPosts))
-	fmt.Printf("Future posts: %d\n", len(futurePosts))
+	fmt.Printf("Future posts for today: %d\n", len(futurePosts))
 
 	// Check poster (xurl) availability
 	if err := poster.Validate(); err != nil {
@@ -154,69 +147,24 @@ func runValidate(cfg *config.Config, configPath string) error {
 
 // Displays upcoming posts information
 func showUpcomingPosts(futurePosts []config.Post) {
-	fmt.Printf("\nUpcoming posts:\n")
+	fmt.Printf("\nUpcoming posts for today:\n")
 	for i, post := range futurePosts {
 		if i >= 5 { // Show only first 5
 			fmt.Printf("... and %d more\n", len(futurePosts)-5)
 			break
 		}
-		fmt.Printf("  %s: %s\n",
-			post.ScheduledAt.Format("2006-01-02 15:04"),
-			truncateContent(post.Content, 50))
+		if post.Test {
+			fmt.Printf("  [TEST] %s\n", truncateContent(post.Content, 50))
+		} else {
+			fmt.Printf("  %s: %s\n",
+				post.ScheduledAt.Format("15:04"),
+				truncateContent(post.Content, 50))
+		}
 	}
-}
-
-func runSetup(cfg *config.Config, configPath string) error {
-	logger.Info("Setting up cron configuration")
-
-	// Get absolute paths
-	absConfigPath, err := filepath.Abs(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute config path: %w", err)
-	}
-
-	executablePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
-	}
-
-	// Create cron generator
-	generator := cron.NewGenerator(executablePath, absConfigPath)
-
-	// Validate permissions
-	if err := generator.Validate(); err != nil {
-		return fmt.Errorf("permission check failed: %w", err)
-	}
-
-	// Get future posts only
-	futurePosts := cfg.GetFuturePosts()
-
-	if len(futurePosts) == 0 {
-		logger.Warn("No future posts found - removing existing cron configuration")
-		return generator.Remove()
-	}
-
-	// Show preview and generate cron file
-	return generateCronConfiguration(generator, futurePosts)
-}
-
-// Shows preview and generates cron configuration
-func generateCronConfiguration(generator *cron.Generator, futurePosts []config.Post) error {
-	// Show preview
-	fmt.Printf("Cron configuration preview:\n")
-	fmt.Printf("%s\n", generator.Preview(futurePosts))
-
-	// Generate cron file
-	if err := generator.Generate(futurePosts); err != nil {
-		return fmt.Errorf("failed to generate cron configuration: %w", err)
-	}
-
-	fmt.Printf("Successfully configured %d scheduled posts\n", len(futurePosts))
-	return nil
 }
 
 func runExecute(cfg *config.Config, configPath string) error {
-	logger.Info("Executing scheduled posts")
+	logger.Info("Executing posts scheduled for today")
 
 	// Create executor and execute posts
 	exec := executor.NewExecutor()
@@ -228,16 +176,17 @@ func showHelp() {
 	fmt.Printf("USAGE:\n")
 	fmt.Printf("  x-scheduler [flags] <config.yaml>\n\n")
 	fmt.Printf("FLAGS:\n")
-	fmt.Printf("  -setup      Generate cron configuration from YAML file\n")
-	fmt.Printf("  -execute    Execute scheduled posts for current time\n")
+	fmt.Printf("  -execute    Execute posts scheduled for today\n")
 	fmt.Printf("  -validate   Validate configuration file\n")
 	fmt.Printf("  -verbose    Enable verbose logging\n")
 	fmt.Printf("  -version    Show version information\n")
 	fmt.Printf("  -help       Show this help message\n\n")
 	fmt.Printf("EXAMPLES:\n")
 	fmt.Printf("  x-scheduler -validate config.yaml\n")
-	fmt.Printf("  x-scheduler -setup config.yaml\n")
 	fmt.Printf("  x-scheduler -execute config.yaml\n\n")
+	fmt.Printf("SCHEDULING:\n")
+	fmt.Printf("  Run daily via cron to process scheduled posts:\n")
+	fmt.Printf("  0 0 * * * /usr/local/bin/x-scheduler -execute /path/to/config.yaml\n\n")
 	fmt.Printf("REQUIREMENTS:\n")
 	fmt.Printf("  xurl        X API command-line tool for OAuth 2.0 authentication\n")
 	fmt.Printf("              Install from: https://github.com/xdevplatform/xurl\n")

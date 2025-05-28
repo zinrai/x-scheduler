@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/zinrai/x-scheduler/internal/config"
@@ -9,51 +10,130 @@ import (
 	"github.com/zinrai/x-scheduler/pkg/logger"
 )
 
+// Represents a post with its execution time
+type ScheduledPost struct {
+	Post      config.Post
+	ExecuteAt time.Time
+}
+
 // Handles the execution of scheduled posts
 type Executor struct {
+	jobQueue chan ScheduledPost
 }
 
 // Creates a new executor instance
 func NewExecutor() *Executor {
-	return &Executor{}
+	return &Executor{
+		jobQueue: make(chan ScheduledPost, 100), // Buffer for up to 100 posts
+	}
 }
 
-// Finds and posts tweets that should be posted at the current time
+// Processes all posts scheduled for today that are in the future
 func (e *Executor) Execute(cfg *config.Config) error {
-	logger.Info("Starting execution check")
+	logger.Info("Starting execution")
 
 	// Validate poster (xurl command)
 	if err := poster.Validate(); err != nil {
 		return fmt.Errorf("poster validation failed: %w", err)
 	}
 
-	// Get enabled posts
-	enabledPosts := cfg.GetEnabledPosts()
-	logger.Debug("Found %d enabled posts", len(enabledPosts))
-
-	// Find posts that should be posted now (including test posts)
-	currentTime := time.Now()
-	matchingPosts := FindMatchingPosts(enabledPosts, currentTime)
-
-	if len(matchingPosts) == 0 {
-		logger.Info("No posts scheduled for current time (%s)", currentTime.Format("2006-01-02 15:04"))
+	// Get future posts for today
+	futurePosts := e.getFuturePosts(cfg)
+	if len(futurePosts) == 0 {
+		logger.Info("No posts scheduled for execution")
 		return nil
 	}
 
-	logger.Info("Found %d posts to publish", len(matchingPosts))
+	logger.Info("Found %d posts scheduled for execution", len(futurePosts))
 
-	// Separate test posts and regular posts for different handling
-	testPosts, regularPosts := e.separatePostsByType(matchingPosts)
+	// Sort posts by execution time
+	sort.Slice(futurePosts, func(i, j int) bool {
+		return futurePosts[i].ExecuteAt.Before(futurePosts[j].ExecuteAt)
+	})
 
-	// Post each matching tweet
+	// Queue all posts
+	e.queuePosts(futurePosts)
+
+	// Process queue sequentially
+	return e.processQueue()
+}
+
+// Returns posts scheduled for today that are in the future
+func (e *Executor) getFuturePosts(cfg *config.Config) []ScheduledPost {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrow := today.Add(24 * time.Hour)
+
+	var futurePosts []ScheduledPost
+
+	for _, post := range cfg.GetEnabledPosts() {
+		// Test posts are executed immediately regardless of schedule
+		if post.Test {
+			futurePosts = append(futurePosts, ScheduledPost{
+				Post:      post,
+				ExecuteAt: now, // Execute immediately
+			})
+			continue
+		}
+
+		// Check if post is scheduled for today
+		if post.ScheduledAt.After(today) && post.ScheduledAt.Before(tomorrow) {
+			// Only include future posts
+			if post.ScheduledAt.After(now) {
+				futurePosts = append(futurePosts, ScheduledPost{
+					Post:      post,
+					ExecuteAt: post.ScheduledAt,
+				})
+			} else {
+				// Log skipped past posts
+				logger.Info("Skipping past post: %s (scheduled at %s)",
+					truncateContent(post.Content, 30),
+					post.ScheduledAt.Format("15:04:05"))
+			}
+		}
+	}
+
+	return futurePosts
+}
+
+// Adds posts to the processing queue
+func (e *Executor) queuePosts(posts []ScheduledPost) {
+	for _, scheduledPost := range posts {
+		nextPostTime := time.Until(scheduledPost.ExecuteAt)
+		if nextPostTime > 0 {
+			logger.Info("Queuing post: %s (in %v at %s)",
+				truncateContent(scheduledPost.Post.Content, 30),
+				nextPostTime.Round(time.Second),
+				scheduledPost.ExecuteAt.Format("15:04:05"))
+		} else {
+			logger.Info("Queuing immediate post: %s",
+				truncateContent(scheduledPost.Post.Content, 30))
+		}
+
+		e.jobQueue <- scheduledPost
+	}
+
+	// Close the queue to signal no more posts
+	close(e.jobQueue)
+}
+
+// Processes posts from the queue sequentially
+func (e *Executor) processQueue() error {
 	var errors []error
 	successCount := 0
 
-	// Handle regular posts
-	successCount += e.processRegularPosts(regularPosts, &errors)
+	for scheduledPost := range e.jobQueue {
+		// Wait until it's time to post
+		e.waitUntilTime(scheduledPost.ExecuteAt)
 
-	// Handle test posts
-	successCount += e.processTestPosts(testPosts, &errors)
+		// Execute the post
+		if err := e.executePost(scheduledPost); err != nil {
+			logger.Error("Failed to execute post: %v", err)
+			errors = append(errors, err)
+		} else {
+			successCount++
+		}
+	}
 
 	// Report results
 	logger.Info("Execution completed: %d successful, %d failed", successCount, len(errors))
@@ -65,80 +145,54 @@ func (e *Executor) Execute(cfg *config.Config) error {
 	return nil
 }
 
-// Separates posts into test and regular posts
-func (e *Executor) separatePostsByType(posts []config.Post) ([]config.Post, []config.Post) {
-	var testPosts, regularPosts []config.Post
-	for _, post := range posts {
-		if post.Test {
-			testPosts = append(testPosts, post)
-		} else {
-			regularPosts = append(regularPosts, post)
-		}
+// Waits until the specified time
+func (e *Executor) waitUntilTime(executeAt time.Time) {
+	now := time.Now()
+	if executeAt.After(now) {
+		waitDuration := executeAt.Sub(now)
+		logger.Debug("Waiting %v until execution time (%s)", waitDuration, executeAt.Format("15:04:05"))
+		time.Sleep(waitDuration)
 	}
-	return testPosts, regularPosts
 }
 
-// Handles regular scheduled posts
-func (e *Executor) processRegularPosts(posts []config.Post, errors *[]error) int {
-	successCount := 0
+// Executes a single post
+func (e *Executor) executePost(scheduledPost ScheduledPost) error {
+	post := scheduledPost.Post
 
-	for i, post := range posts {
-		logger.Info("Posting tweet %d/%d: %s", i+1, len(posts), truncateContent(post.Content, 50))
-
-		if err := poster.Post(post.Content); err != nil {
-			logger.Error("Failed to post tweet: %v", err)
-			*errors = append(*errors, fmt.Errorf("failed to post tweet '%s': %w", truncateContent(post.Content, 30), err))
-			continue
-		}
-
-		logger.Info("Tweet posted successfully: %s", truncateContent(post.Content, 50))
-		successCount++
+	// Handle dry run
+	if post.DryRun {
+		logger.Info("DRY RUN: Would post: %s", post.Content)
+		fmt.Printf("✓ [DRY RUN] Would post: %s\n", post.Content)
+		return nil
 	}
 
-	return successCount
-}
-
-// Handles test posts (with dry-run support)
-func (e *Executor) processTestPosts(posts []config.Post, errors *[]error) int {
-	successCount := 0
-
-	for i, post := range posts {
-		if post.DryRun {
-			successCount += e.processDryRunPost(post, i, len(posts))
-			continue
-		}
-
-		successCount += e.processActualTestPost(post, i, len(posts), errors)
+	// Handle test posts
+	if post.Test {
+		logger.Info("Test post: %s", truncateContent(post.Content, 50))
+	} else {
+		logger.Info("Posting: %s", truncateContent(post.Content, 50))
 	}
 
-	return successCount
-}
-
-// Handles a single dry-run test post
-func (e *Executor) processDryRunPost(post config.Post, index, total int) int {
-	logger.Info("Test post %d/%d (DRY RUN): %s", index+1, total, truncateContent(post.Content, 50))
-	fmt.Printf("✓ [DRY RUN] Would post: %s\n", post.Content)
-	return 1
-}
-
-// Handles a single actual test post
-func (e *Executor) processActualTestPost(post config.Post, index, total int, errors *[]error) int {
-	logger.Info("Test post %d/%d: %s", index+1, total, truncateContent(post.Content, 50))
-
+	// Execute actual post
 	if err := poster.Post(post.Content); err != nil {
-		logger.Error("Failed to post test tweet: %v", err)
-		*errors = append(*errors, fmt.Errorf("failed to post test tweet '%s': %w", truncateContent(post.Content, 30), err))
-		return 0
+		return fmt.Errorf("failed to post '%s': %w",
+			truncateContent(post.Content, 30), err)
 	}
 
-	fmt.Printf("✓ Test post successful: %s\n", truncateContent(post.Content, 50))
-	return 1
+	// Success message
+	if post.Test {
+		fmt.Printf("✓ Test post successful: %s\n", truncateContent(post.Content, 50))
+	} else {
+		logger.Info("Post successful: %s", truncateContent(post.Content, 50))
+	}
+
+	return nil
 }
 
 // Returns information about scheduled posts
 func (e *Executor) GetStatus(cfg *config.Config) (map[string]interface{}, error) {
 	enabledPosts := cfg.GetEnabledPosts()
-	futurePosts := cfg.GetFuturePosts()
+	futurePosts := e.getFuturePosts(cfg)
 
 	status := map[string]interface{}{
 		"total_posts":   len(cfg.Posts),
@@ -147,9 +201,14 @@ func (e *Executor) GetStatus(cfg *config.Config) (map[string]interface{}, error)
 		"current_time":  time.Now().Format(time.RFC3339),
 	}
 
-	if next := GetNextScheduledTime(enabledPosts); next != nil {
-		status["next_post_time"] = next.Format(time.RFC3339)
-		status["next_post_in"] = time.Until(*next).String()
+	if len(futurePosts) > 0 {
+		// Find next post
+		sort.Slice(futurePosts, func(i, j int) bool {
+			return futurePosts[i].ExecuteAt.Before(futurePosts[j].ExecuteAt)
+		})
+		nextPost := futurePosts[0]
+		status["next_post_time"] = nextPost.ExecuteAt.Format(time.RFC3339)
+		status["next_post_in"] = time.Until(nextPost.ExecuteAt).String()
 	}
 
 	return status, nil
